@@ -499,10 +499,12 @@
             document.getElementById('mic-error').classList.add('hidden');
             stopAllTimers();
             isPreparing = false;
+            seconds = 0; // CORRECTION : Remise à zéro du chronomètre à chaque enregistrement
+            updateTimerDisplay();
 
             try {
                 // Initialize MediaRecorder if not already done or if stream is inactive
-                if (!mediaRecorder || mediaRecorder.state === 'inactive' && !mediaRecorder.stream.active) {
+                if (!mediaRecorder || (mediaRecorder.state === 'inactive' && !mediaRecorder.stream.active)) {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                     mediaRecorder = new MediaRecorder(stream);
                     
@@ -546,6 +548,11 @@
                     };
                 }
 
+                // CORRECTION : Il manquait l'instruction pour démarrer réellement l'enregistrement !
+                if (mediaRecorder.state === 'inactive') {
+                    mediaRecorder.start();
+                }
+
                 document.getElementById('timer-label').innerText = 'Enregistrement en cours (1 minute max)';
                 document.getElementById('timer-label').className = 'text-sm font-bold uppercase tracking-wider mb-1 text-red-500 recording-pulse-text';
                 document.getElementById('timer-display').classList.remove('text-slate-700');
@@ -562,8 +569,8 @@
 
                     if (seconds >= maxRecordingSeconds) {
                         stopRecording();
-                        // Optionnel : avertir l'utilisateur que le temps est écoulé
-                        document.getElementById('timer-label').innerText = 'Temps écoulé !';
+                        // Indiquer visuellement que le temps est écoulé
+                        document.getElementById('timer-label').innerText = 'Temps maximum écoulé !';
                     }
                 }, 1000);
 
@@ -576,12 +583,14 @@
         function stopRecording() {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 mediaRecorder.stop();
-                stopAllTimers();
-                document.getElementById('timer-label').innerText = 'Enregistrement terminé';
-                document.getElementById('timer-label').className = 'text-sm font-bold uppercase tracking-wider mb-1 text-slate-500';
-                document.getElementById('timer-display').classList.remove('text-red-600');
-                document.getElementById('timer-display').classList.add('text-slate-700');
             }
+            
+            // CORRECTION : On s'assure que l'UI s'arrête toujours, même si on atteint les 60s
+            stopAllTimers();
+            document.getElementById('timer-label').innerText = 'Enregistrement terminé';
+            document.getElementById('timer-label').className = 'text-sm font-bold uppercase tracking-wider mb-1 text-slate-500';
+            document.getElementById('timer-display').classList.remove('text-red-600');
+            document.getElementById('timer-display').classList.add('text-slate-700');
         }
 
         function stopAllTimers() {
