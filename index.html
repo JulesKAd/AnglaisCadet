@@ -326,6 +326,7 @@
 
         // --- AUDIO & TIMER GLOBALS ---
         let mediaRecorder;
+        let audioStream = null;
         let audioChunks = [];
         let timerInterval;
         let prepInterval;
@@ -348,9 +349,9 @@
             stopAllTimers();
             
             // Clear stream tracks to free mic
-            if (mediaRecorder && mediaRecorder.stream) {
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                mediaRecorder = null;
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
             }
 
             hideAllViews();
@@ -504,59 +505,42 @@
             document.getElementById('mic-error').classList.add('hidden');
             stopAllTimers();
             isPreparing = false;
-            seconds = 0; // CORRECTION : Remise à zéro du chronomètre à chaque enregistrement
+            seconds = 0; 
             updateTimerDisplay();
 
             try {
-                // Initialize MediaRecorder if not already done or if stream is inactive
-                if (!mediaRecorder || (mediaRecorder.state === 'inactive' && !mediaRecorder.stream.active)) {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder = new MediaRecorder(stream);
-                    
-                    mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) {
-                            audioChunks.push(event.data);
-                        }
-                    };
-                    
-                    mediaRecorder.onstop = () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        const audioUrl = URL.createObjectURL(audioBlob);
-                        
-                        // Save recording
-                        state.recordings[state.currentStep] = {
-                            step: state.currentStep,
-                            prompt: state.currentItem.questions[state.currentStep],
-                            audioUrl: audioUrl
-                        };
-                        
-                        audioChunks = []; // Clear for next time
-                        
-                        // Show Next/Finish button
-                        document.getElementById('record-btn').classList.remove('hidden');
-                        document.getElementById('record-btn').innerHTML = '<i class="fa-solid fa-rotate-right mr-2"></i>Recommencer';
-                        document.getElementById('record-btn').classList.replace('bg-red-500', 'bg-slate-200');
-                        document.getElementById('record-btn').classList.replace('hover:bg-red-600', 'hover:bg-slate-300');
-                        document.getElementById('record-btn').classList.replace('text-white', 'text-slate-700');
-                        document.getElementById('record-btn').classList.remove('shadow-lg', 'shadow-red-500/30');
-
-                        document.getElementById('stop-btn').classList.add('hidden');
-                        document.getElementById('next-btn').classList.remove('hidden');
-
-                        const totalSteps = state.currentItem.questions.length;
-                        if (state.currentStep === totalSteps - 1) {
-                            document.getElementById('next-btn').innerHTML = 'Terminer et Écouter <i class="fa-solid fa-flag-checkered"></i>';
-                            document.getElementById('next-btn').classList.replace('bg-primary', 'bg-green-600');
-                            document.getElementById('next-btn').classList.replace('hover:bg-blue-700', 'hover:bg-green-700');
-                            document.getElementById('next-btn').classList.replace('shadow-blue-500/30', 'shadow-green-500/30');
-                        }
-                    };
+                // Initialisation propre du flux audio : une seule demande de permission
+                if (!audioStream) {
+                    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 }
 
-                // CORRECTION : Il manquait l'instruction pour démarrer réellement l'enregistrement !
-                if (mediaRecorder.state === 'inactive') {
-                    mediaRecorder.start();
-                }
+                // IMPORTANT : Toujours créer un nouveau MediaRecorder pour éviter les blocages d'état
+                mediaRecorder = new MediaRecorder(audioStream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    
+                    // Save recording
+                    state.recordings[state.currentStep] = {
+                        step: state.currentStep,
+                        prompt: state.currentItem.questions[state.currentStep],
+                        audioUrl: audioUrl
+                    };
+                    
+                    audioChunks = []; // Clear for next time
+                    
+                    showPostRecordingButtons();
+                };
+
+                mediaRecorder.start();
 
                 document.getElementById('timer-label').innerText = 'Enregistrement en cours (1 minute max)';
                 document.getElementById('timer-label').className = 'text-sm font-bold uppercase tracking-wider mb-1 text-red-500 recording-pulse-text';
@@ -586,16 +570,43 @@
         }
 
         function stopRecording() {
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
+            stopAllTimers();
+            
+            // On vérifie que le recorder existe et qu'il n'est pas déjà inactif
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop(); // Ceci va déclencher mediaRecorder.onstop et afficher les boutons
+            } else {
+                // Failsafe : si le recorder a planté, on affiche quand même les boutons pour ne pas bloquer l'interface
+                showPostRecordingButtons();
             }
             
-            // CORRECTION : On s'assure que l'UI s'arrête toujours, même si on atteint les 60s
-            stopAllTimers();
             document.getElementById('timer-label').innerText = 'Enregistrement terminé';
             document.getElementById('timer-label').className = 'text-sm font-bold uppercase tracking-wider mb-1 text-slate-500';
             document.getElementById('timer-display').classList.remove('text-red-600');
             document.getElementById('timer-display').classList.add('text-slate-700');
+        }
+
+        function showPostRecordingButtons() {
+            document.getElementById('stop-btn').classList.add('hidden');
+            
+            const recordBtn = document.getElementById('record-btn');
+            recordBtn.classList.remove('hidden');
+            recordBtn.innerHTML = '<i class="fa-solid fa-rotate-right mr-2"></i>Recommencer';
+            recordBtn.classList.replace('bg-red-500', 'bg-slate-200');
+            recordBtn.classList.replace('hover:bg-red-600', 'hover:bg-slate-300');
+            recordBtn.classList.replace('text-white', 'text-slate-700');
+            recordBtn.classList.remove('shadow-lg', 'shadow-red-500/30');
+
+            const nextBtn = document.getElementById('next-btn');
+            nextBtn.classList.remove('hidden');
+
+            const totalSteps = state.currentItem.questions.length;
+            if (state.currentStep === totalSteps - 1) {
+                nextBtn.innerHTML = 'Terminer et Écouter <i class="fa-solid fa-flag-checkered"></i>';
+                nextBtn.classList.replace('bg-primary', 'bg-green-600');
+                nextBtn.classList.replace('hover:bg-blue-700', 'hover:bg-green-700');
+                nextBtn.classList.replace('shadow-blue-500/30', 'shadow-green-500/30');
+            }
         }
 
         function stopAllTimers() {
@@ -623,9 +634,9 @@
 
         function renderReview() {
             // Free the microphone
-            if (mediaRecorder && mediaRecorder.stream) {
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                mediaRecorder = null;
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
             }
 
             hideAllViews();
